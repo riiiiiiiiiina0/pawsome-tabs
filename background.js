@@ -82,7 +82,11 @@ chrome.action.onClicked.addListener((tab) => {
 
 // --- Tab Lifecycle Listeners ---
 
-chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
+    // If cache is empty, it might be due to service worker restart. Load it.
+    if (Object.keys(tabTitlesCache).length === 0) {
+        await loadTitlesToCache();
+    }
     const customTitleRecord = tabTitlesCache[tabId];
     if (!customTitleRecord) {
         return; // This tab doesn't have a custom title, so we don't care about it.
@@ -116,6 +120,25 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
     if (changeInfo.url) {
         tabTitlesCache[tabId].url = changeInfo.url;
         chrome.storage.local.set({ tabTitles: tabTitlesCache });
+    }
+});
+
+// Fired when a tab is replaced with another tab due to prerendering or instant.
+chrome.tabs.onReplaced.addListener((addedTabId, removedTabId) => {
+    if (tabTitlesCache[removedTabId]) {
+        console.log(`Tab ${removedTabId} was replaced by ${addedTabId}. Transferring title.`);
+        const record = tabTitlesCache[removedTabId];
+        tabTitlesCache[addedTabId] = record;
+        delete tabTitlesCache[removedTabId];
+
+        chrome.storage.local.set({ tabTitles: tabTitlesCache });
+
+        // Apply the title to the new tab immediately.
+        chrome.tabs.sendMessage(addedTabId, { type: 'set_custom_title', title: record.title }, () => {
+            if (chrome.runtime.lastError) {
+                console.warn(`Could not apply title to replaced tab ${addedTabId} immediately.`);
+            }
+        });
     }
 });
 
