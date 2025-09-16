@@ -1,0 +1,18 @@
+{
+  "name": "pawsome-tabs",
+  "version": "1.0.0",
+  "description": "Rename any tab title in Chrome — and keep sites from changing it back.",
+  "main": "background.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/chrome": "^0.1.11"
+  }
+}
