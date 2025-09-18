@@ -42,6 +42,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             isSettingCustomTitle = true;
             document.title = request.title;
             isSettingCustomTitle = false;
+            // Re-assert the title after a short delay to override any late-loading page scripts.
+            setTimeout(() => {
+                isSettingCustomTitle = true;
+                document.title = request.title;
+                isSettingCustomTitle = false;
+            }, 500);
             break;
 
         case 'remove_custom_title':
