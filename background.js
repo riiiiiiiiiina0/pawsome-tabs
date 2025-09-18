@@ -175,17 +175,22 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
 
   // --- Trigger title application at multiple points for robustness ---
 
-  // 1. When the tab starts loading
+  // 1. When a discarded tab is reloaded, this is the first event fired.
+  if (changeInfo.discarded === false) {
+    applyTitle();
+  }
+
+  // 2. When the tab starts loading
   if (changeInfo.status === 'loading') {
     applyTitle();
   }
 
-  // 2. When the tab has finished loading
+  // 3. When the tab has finished loading
   if (changeInfo.status === 'complete') {
     applyTitle();
   }
 
-  // 3. When the page's title changes to something else
+  // 4. When the page's title changes to something else
   if (changeInfo.title && changeInfo.title !== customTitleRecord.title) {
     applyTitle();
   }
