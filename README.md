@@ -42,7 +42,6 @@ Notes:
 
 - `storage`: Save your custom titles locally on your device.
 - `tabs`: Read tab info (id, url) to apply and track titles.
-- `scripting`: Inject and run the content script early on pages.
 - `host_permissions: <all_urls>`: Allow the content script to run on all sites so titles can be set.
 
 ## Privacy
