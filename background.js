@@ -18,6 +18,83 @@ const loadTitlesToCache = () => {
 // Load cache when the extension is installed or updated
 chrome.runtime.onInstalled.addListener(loadTitlesToCache);
 
+// Also load cache when service worker starts (handles service worker restarts)
+// This ensures we have the cache available even if the service worker was terminated
+(async () => {
+  await loadTitlesToCache();
+  console.log('Service worker initialized, cache loaded.');
+})();
+
+// Periodic check to ensure all tabs with custom titles have them applied
+// This serves as a fallback for any missed applications
+const performPeriodicTitleCheck = async () => {
+  if (Object.keys(tabTitlesCache).length === 0) {
+    await loadTitlesToCache();
+  }
+
+  if (Object.keys(tabTitlesCache).length === 0) return;
+
+  chrome.tabs.query({}, (tabs) => {
+    for (const tab of tabs) {
+      const customTitleRecord = tabTitlesCache[tab.id];
+      if (customTitleRecord && typeof tab.id === 'number') {
+        // Check if the tab's current title matches our custom title
+        // If not, it might need to be reapplied
+        if (tab.title !== customTitleRecord.title) {
+          console.log(
+            `Periodic check: Reapplying title "${customTitleRecord.title}" to tab ${tab.id}`,
+          );
+          applyTitleWithRetry(tab.id, customTitleRecord.title, 1, 500);
+        }
+      }
+    }
+  });
+};
+
+// Run periodic check every 30 seconds
+setInterval(performPeriodicTitleCheck, 30000);
+
+// Helper function to apply title with retry logic
+const applyTitleWithRetry = (tabId, title, maxRetries = 3, delay = 1000) => {
+  let attempts = 0;
+
+  const attemptApply = () => {
+    attempts++;
+    chrome.tabs.sendMessage(
+      tabId,
+      { type: 'set_custom_title', title: title },
+      (response) => {
+        if (chrome.runtime.lastError) {
+          const message = String(
+            chrome.runtime.lastError.message || chrome.runtime.lastError,
+          );
+          const noReceiver =
+            message.includes('Receiving end does not exist') ||
+            message.includes('Could not establish connection') ||
+            message.includes('The message port closed') ||
+            message.includes('No matching recipient') ||
+            message.includes('Disconnected port');
+
+          if (noReceiver && attempts < maxRetries) {
+            console.log(
+              `Title application failed for tab ${tabId}, attempt ${attempts}/${maxRetries}. Retrying in ${delay}ms...`,
+            );
+            setTimeout(attemptApply, delay);
+          } else if (attempts >= maxRetries) {
+            console.warn(
+              `Failed to apply title to tab ${tabId} after ${maxRetries} attempts. Will try again when tab updates.`,
+            );
+          }
+        } else {
+          console.log(`Successfully applied title "${title}" to tab ${tabId}`);
+        }
+      },
+    );
+  };
+
+  attemptApply();
+};
+
 // Load cache and re-map titles on browser startup
 chrome.runtime.onStartup.addListener(async () => {
   console.log('Browser starting up. Restoring custom tab titles.');
@@ -34,29 +111,53 @@ chrome.runtime.onStartup.addListener(async () => {
 
   chrome.tabs.query({}, (tabs) => {
     const newTabTitles = {};
+    const tabsToProcess = [];
+
     for (const tab of tabs) {
       const record = urlToRecord[tab.url];
       if (record && typeof tab.id === 'number') {
         // Match found: create a new record with the new tab ID
         newTabTitles[tab.id] = { title: record.title, url: tab.url };
-        // Apply the title to the tab
-        chrome.tabs.sendMessage(
-          tab.id,
-          { type: 'set_custom_title', title: record.title },
-          () => {
-            if (chrome.runtime.lastError) {
-              /* ignore, cs may not be ready */
-            }
-          },
-        );
+        tabsToProcess.push({ tabId: tab.id, title: record.title });
         delete urlToRecord[tab.url]; // Prevent re-use for other tabs with same URL
       }
     }
+
     // Replace the old cache and storage with the new, correct mappings
     tabTitlesCache = newTabTitles;
     chrome.storage.local.set({ tabTitles: tabTitlesCache });
-    console.log('Finished re-mapping tab titles.');
+
+    // Apply titles with staggered timing to avoid overwhelming the system
+    tabsToProcess.forEach((item, index) => {
+      setTimeout(() => {
+        applyTitleWithRetry(item.tabId, item.title);
+      }, index * 200); // Stagger by 200ms each
+    });
+
+    console.log(`Finished re-mapping ${tabsToProcess.length} tab titles.`);
   });
+});
+
+// --- Message Handlers ---
+
+// Handle messages from content scripts
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  if (
+    request.type === 'check_custom_title' &&
+    sender.tab &&
+    typeof sender.tab.id === 'number'
+  ) {
+    const customTitleRecord = tabTitlesCache[sender.tab.id];
+    if (customTitleRecord) {
+      sendResponse({
+        hasCustomTitle: true,
+        title: customTitleRecord.title,
+      });
+    } else {
+      sendResponse({ hasCustomTitle: false });
+    }
+    return true; // Keep message channel open for async response
+  }
 });
 
 // --- Action Handler ---
@@ -160,17 +261,9 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
     return; // This tab doesn't have a custom title, so we don't care about it.
   }
 
-  // Helper function to apply the title
+  // Helper function to apply the title with retry logic
   const applyTitle = () => {
-    chrome.tabs.sendMessage(
-      tabId,
-      { type: 'set_custom_title', title: customTitleRecord.title },
-      () => {
-        if (chrome.runtime.lastError) {
-          /* Ignored, as script may not be ready */
-        }
-      },
-    );
+    applyTitleWithRetry(tabId, customTitleRecord.title, 2, 500); // Fewer retries for tab updates
   };
 
   // --- Trigger title application at multiple points for robustness ---
@@ -180,9 +273,12 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
     applyTitle();
   }
 
-  // 2. When the tab starts loading
+  // 2. When the tab starts loading - apply immediately and repeatedly
   if (changeInfo.status === 'loading') {
     applyTitle();
+    // Apply again after a short delay to catch content script injection
+    setTimeout(() => applyTitle(), 100);
+    setTimeout(() => applyTitle(), 300);
   }
 
   // 3. When the tab has finished loading
@@ -214,18 +310,22 @@ chrome.tabs.onReplaced.addListener((addedTabId, removedTabId) => {
 
     chrome.storage.local.set({ tabTitles: tabTitlesCache });
 
-    // Apply the title to the new tab immediately.
-    chrome.tabs.sendMessage(
-      addedTabId,
-      { type: 'set_custom_title', title: record.title },
-      () => {
-        if (chrome.runtime.lastError) {
-          console.warn(
-            `Could not apply title to replaced tab ${addedTabId} immediately.`,
-          );
-        }
-      },
-    );
+    // Apply the title to the new tab with retry logic.
+    applyTitleWithRetry(addedTabId, record.title);
+  }
+});
+
+// Apply custom title when a tab becomes active (user switches to it)
+chrome.tabs.onActivated.addListener(async (activeInfo) => {
+  // If cache is empty, it might be due to service worker restart. Load it.
+  if (Object.keys(tabTitlesCache).length === 0) {
+    await loadTitlesToCache();
+  }
+
+  const customTitleRecord = tabTitlesCache[activeInfo.tabId];
+  if (customTitleRecord) {
+    // Apply the title when the tab becomes active
+    applyTitleWithRetry(activeInfo.tabId, customTitleRecord.title, 2, 300);
   }
 });
 
