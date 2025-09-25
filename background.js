@@ -16,7 +16,16 @@ const loadTitlesToCache = () => {
 };
 
 // Load cache when the extension is installed or updated
-chrome.runtime.onInstalled.addListener(loadTitlesToCache);
+chrome.runtime.onInstalled.addListener(async () => {
+  await loadTitlesToCache();
+
+  // Create context menu item
+  chrome.contextMenus.create({
+    id: 'use-content-as-title',
+    title: 'Use content as title',
+    contexts: ['page'],
+  });
+});
 
 // Also load cache when service worker starts (handles service worker restarts)
 // This ensures we have the cache available even if the service worker was terminated
@@ -334,5 +343,30 @@ chrome.tabs.onRemoved.addListener((tabId, removeInfo) => {
   if (tabTitlesCache[tabId]) {
     delete tabTitlesCache[tabId];
     chrome.storage.local.set({ tabTitles: tabTitlesCache });
+  }
+});
+
+// --- Context Menu Handlers ---
+
+// Handle context menu clicks
+chrome.contextMenus.onClicked.addListener((info, tab) => {
+  if (
+    info.menuItemId === 'use-content-as-title' &&
+    tab &&
+    typeof tab.id === 'number'
+  ) {
+    // Send message to content script to initialize DOM selector
+    chrome.tabs.sendMessage(
+      tab.id,
+      { type: 'init_dom_selector' },
+      (response) => {
+        if (chrome.runtime.lastError) {
+          console.error(
+            'Failed to initialize DOM selector:',
+            chrome.runtime.lastError,
+          );
+        }
+      },
+    );
   }
 });

@@ -12,7 +12,8 @@
   },
   "permissions": [
     "storage",
-    "tabs"
+    "tabs",
+    "contextMenus"
   ],
   "host_permissions": [
     "<all_urls>"
@@ -26,6 +27,7 @@
         "<all_urls>"
       ],
       "js": [
+        "libs/dom-selector.js",
         "content.js"
       ],
       "run_at": "document_start"

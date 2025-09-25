@@ -242,15 +242,6 @@
             .replace(/\[name=[^\]]*]/g, '');
       }
 
-      console.log(
-        '%c Unique css selector for the clicked element is : ',
-        'color: red',
-      );
-      console.log(result);
-      console.log(
-        '---------------------------------------------------------------------',
-      );
-
       return result;
     };
 
@@ -304,6 +295,10 @@
      * Clones each element onto itself to remove any default handlers
      * */
     const cloneElem = function (elem) {
+      // Check if element has a parent node before attempting to replace
+      if (!elem.parentNode) {
+        return elem;
+      }
       const new_element = elem.cloneNode(true);
       elem.parentNode.replaceChild(new_element, elem);
       return new_element;
@@ -376,7 +371,8 @@
 
       // initiate the library
       const action = type ? actions.start : actions.stop;
-      removeDefaultHandlers();
+      // Skip removeDefaultHandlers() to prevent page flashing and element loss
+      // removeDefaultHandlers();
       setUpInspector();
       attachListeners(action);
       handleCloseByEscape();

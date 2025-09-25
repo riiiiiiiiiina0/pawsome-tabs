@@ -117,6 +117,20 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       document.title = originalTitleOnLoad;
       isSettingCustomTitle = false;
       break;
+
+    case 'init_dom_selector':
+      // Initialize DOM selector with callback to console log the selector
+      // @ts-ignore - domElementHighlighter is added by the dom-selector.js library
+      if (window.domElementHighlighter) {
+        // @ts-ignore
+        window.domElementHighlighter.init(true, (selector) => {
+          console.log('Selected DOM element selector:', selector);
+        });
+      } else {
+        console.error('DOM element highlighter not available');
+      }
+      sendResponse({ success: true });
+      break;
   }
   return true; // Needed for async sendResponse
 });
