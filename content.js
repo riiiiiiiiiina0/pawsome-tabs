@@ -11,14 +11,18 @@ const checkForCustomTitleImmediately = () => {
       // Background script might not be ready, will try again later
       return;
     }
-    if (response && response.hasCustomTitle && response.title) {
-      pendingCustomTitle = response.title;
-      hasCustomTitle = true;
-      // Apply immediately if possible
-      if (document.readyState !== 'loading') {
-        isSettingCustomTitle = true;
-        document.title = response.title;
-        isSettingCustomTitle = false;
+    if (response && response.hasCustomTitle) {
+      if (response.monitoringSelector) {
+        chrome.runtime.sendMessage({ type: 'monitor_element', selector: response.monitoringSelector });
+      } else if (response.title) {
+        pendingCustomTitle = response.title;
+        hasCustomTitle = true;
+        // Apply immediately if possible
+        if (document.readyState !== 'loading') {
+          isSettingCustomTitle = true;
+          document.title = response.title;
+          isSettingCustomTitle = false;
+        }
       }
     }
   });
@@ -70,9 +74,80 @@ if (originalTitleDescriptor) {
   });
 }
 
+let isPicking = false;
+let highlightElement = null;
+let currentObserver = null;
+
+const createCssSelector = (el) => {
+  if (!(el instanceof Element)) return;
+  const path = [];
+  while (el.nodeType === Node.ELEMENT_NODE) {
+    let selector = el.nodeName.toLowerCase();
+    if (el.id) {
+      selector += '#' + el.id;
+      path.unshift(selector);
+      break;
+    } else {
+      let sib = el, nth = 1;
+      while (sib = sib.previousElementSibling) {
+        if (sib.nodeName.toLowerCase() == selector)
+          nth++;
+      }
+      if (nth != 1)
+        selector += ":nth-of-type("+nth+")";
+    }
+    path.unshift(selector);
+    el = el.parentNode;
+  }
+  return path.join(" > ");
+}
+
+const startPicking = () => {
+  if (isPicking) return;
+  isPicking = true;
+  document.body.style.cursor = 'crosshair';
+
+  const mouseoverHandler = (e) => {
+    if (highlightElement) {
+      highlightElement.style.outline = '';
+    }
+    highlightElement = e.target;
+    highlightElement.style.outline = '2px solid red';
+  };
+
+  const clickHandler = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    if (highlightElement) {
+      highlightElement.style.outline = '';
+      const selector = createCssSelector(highlightElement);
+      chrome.runtime.sendMessage({ type: 'element_selected', selector: selector });
+    }
+    stopPicking();
+  };
+
+  const stopPicking = () => {
+    document.body.style.cursor = 'default';
+    if (highlightElement) {
+      highlightElement.style.outline = '';
+    }
+    document.removeEventListener('mouseover', mouseoverHandler);
+    document.removeEventListener('click', clickHandler);
+    isPicking = false;
+  };
+
+  document.addEventListener('mouseover', mouseoverHandler);
+  document.addEventListener('click', clickHandler, true);
+};
+
+
 // Listener for messages
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   switch (request.type) {
+    case 'start_picking':
+      startPicking();
+      break;
     case 'get_new_title_prompt':
       // The prompt should show the current title, whether it's custom or original.
       const newTitle = prompt(
@@ -82,7 +157,43 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       sendResponse({ newTitle: newTitle });
       break;
 
+    case 'monitor_element':
+      const selector = request.selector;
+      const element = document.querySelector(selector);
+      if (element) {
+        const updateTitle = () => {
+          const newTitle = element.textContent.trim();
+          if (document.title !== newTitle) {
+            isSettingCustomTitle = true;
+            document.title = newTitle;
+            isSettingCustomTitle = false;
+            chrome.runtime.sendMessage({ type: 'update_title', title: newTitle, monitoringSelector: selector });
+          }
+        };
+
+        updateTitle(); // Set initial title
+
+        if (currentObserver) {
+          currentObserver.disconnect();
+        }
+        currentObserver = new MutationObserver(updateTitle);
+        currentObserver.observe(element, {
+          childList: true,
+          subtree: true,
+          characterData: true,
+        });
+      } else {
+        isSettingCustomTitle = true;
+        document.title = '[Monitoring] Element not found';
+        isSettingCustomTitle = false;
+      }
+      break;
+
     case 'set_custom_title':
+      if (currentObserver) {
+        currentObserver.disconnect();
+        currentObserver = null;
+      }
       pendingCustomTitle = request.title;
       hasCustomTitle = true;
       isSettingCustomTitle = true;
@@ -110,6 +221,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       break;
 
     case 'remove_custom_title':
+      if (currentObserver) {
+        currentObserver.disconnect();
+        currentObserver = null;
+      }
       hasCustomTitle = false;
       pendingCustomTitle = null;
       // Restore the title to what it was when the page first loaded.

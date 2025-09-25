@@ -16,7 +16,22 @@ const loadTitlesToCache = () => {
 };
 
 // Load cache when the extension is installed or updated
-chrome.runtime.onInstalled.addListener(loadTitlesToCache);
+chrome.runtime.onInstalled.addListener(() => {
+  loadTitlesToCache();
+  // Create context menu
+  chrome.contextMenus.create({
+    id: "monitor-page-content",
+    title: "Monitor page content",
+    contexts: ["page"],
+  });
+});
+
+// Listener for context menu clicks
+chrome.contextMenus.onClicked.addListener((info, tab) => {
+  if (info.menuItemId === "monitor-page-content" && tab && typeof tab.id === 'number') {
+    chrome.tabs.sendMessage(tab.id, { type: 'start_picking' });
+  }
+});
 
 // Also load cache when service worker starts (handles service worker restarts)
 // This ensures we have the cache available even if the service worker was terminated
@@ -152,11 +167,32 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       sendResponse({
         hasCustomTitle: true,
         title: customTitleRecord.title,
+        monitoringSelector: customTitleRecord.monitoringSelector,
       });
     } else {
       sendResponse({ hasCustomTitle: false });
     }
     return true; // Keep message channel open for async response
+  } else if (
+    request.type === 'element_selected' &&
+    sender.tab &&
+    typeof sender.tab.id === 'number'
+  ) {
+    const tabId = sender.tab.id;
+    const selector = request.selector;
+    if (selector) {
+      // Instruct the content script to start monitoring
+      chrome.tabs.sendMessage(tabId, { type: 'monitor_element', selector: selector });
+    }
+  } else if (
+    request.type === 'update_title' &&
+    sender.tab &&
+    typeof sender.tab.id === 'number'
+  ) {
+    const tabId = sender.tab.id;
+    const { title, monitoringSelector } = request;
+    tabTitlesCache[tabId] = { title: title, url: sender.tab.url, monitoringSelector: monitoringSelector };
+    chrome.storage.local.set({ tabTitles: tabTitlesCache });
   }
 });
 
@@ -170,7 +206,7 @@ const processNewTitleResponse = (tab, response) => {
     const newTitle = response.newTitle.trim();
     if (newTitle) {
       // Set the custom title in cache and storage
-      tabTitlesCache[tab.id] = { title: newTitle, url: tab.url };
+      tabTitlesCache[tab.id] = { title: newTitle, url: tab.url, monitoringSelector: null };
       chrome.storage.local.set({ tabTitles: tabTitlesCache }, () => {
         chrome.tabs.sendMessage(tab.id, {
           type: 'set_custom_title',
@@ -269,6 +305,11 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
   // --- Trigger title application at multiple points for robustness ---
 
   // 1. When a discarded tab is reloaded, this is the first event fired.
+  if (customTitleRecord.monitoringSelector) {
+    // If we're monitoring an element, we need to re-run the monitor script
+    chrome.tabs.sendMessage(tabId, { type: 'monitor_element', selector: customTitleRecord.monitoringSelector });
+    return; // Don't apply a stale title
+  }
   if (changeInfo.discarded === false) {
     applyTitle();
   }
@@ -293,6 +334,10 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
 
   // --- Handle URL changes for persistence ---
   if (changeInfo.url) {
+    // If the URL changes, we should stop monitoring
+    if (customTitleRecord.monitoringSelector) {
+      customTitleRecord.monitoringSelector = null;
+    }
     tabTitlesCache[tabId].url = changeInfo.url;
     chrome.storage.local.set({ tabTitles: tabTitlesCache });
   }
