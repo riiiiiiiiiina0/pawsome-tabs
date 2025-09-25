@@ -47,6 +47,11 @@ const performPeriodicTitleCheck = async () => {
     for (const tab of tabs) {
       const customTitleRecord = tabTitlesCache[tab.id];
       if (customTitleRecord && typeof tab.id === 'number') {
+        // Skip DOM element titles from periodic reapplication as they manage themselves
+        if (customTitleRecord.isDomElement) {
+          continue;
+        }
+
         // Check if the tab's current title matches our custom title
         // If not, it might need to be reapplied
         if (tab.title !== customTitleRecord.title) {
@@ -167,6 +172,54 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     }
     return true; // Keep message channel open for async response
   }
+
+  if (
+    request.type === 'get_fallback_title' &&
+    sender.tab &&
+    typeof sender.tab.id === 'number'
+  ) {
+    const customTitleRecord = tabTitlesCache[sender.tab.id];
+    if (customTitleRecord && !customTitleRecord.isDomElement) {
+      // Return the current custom title as fallback
+      sendResponse({ fallbackTitle: customTitleRecord.title });
+    } else {
+      sendResponse({ fallbackTitle: null });
+    }
+    return true;
+  }
+
+  if (
+    request.type === 'dom_element_selected' &&
+    sender.tab &&
+    typeof sender.tab.id === 'number'
+  ) {
+    console.log(
+      `DOM element selected for tab ${sender.tab.id}: ${request.selector}`,
+    );
+
+    // Preserve the existing custom title as fallback
+    const existingRecord = tabTitlesCache[sender.tab.id];
+    const fallbackTitle =
+      existingRecord && !existingRecord.isDomElement
+        ? existingRecord.title
+        : null;
+
+    // Store the DOM element selector in the cache with a special marker
+    // This will be treated as a dynamic title that shouldn't be persisted like normal custom titles
+    tabTitlesCache[sender.tab.id] = {
+      title: '[DOM Element]', // Placeholder title
+      url: sender.tab.url,
+      isDomElement: true,
+      selector: request.selector,
+      fallbackTitle: fallbackTitle, // Store the previous custom title as fallback
+    };
+
+    // Don't persist DOM element selections to storage as they're temporary
+    // chrome.storage.local.set({ tabTitles: tabTitlesCache });
+
+    sendResponse({ success: true });
+    return true;
+  }
 });
 
 // --- Action Handler ---
@@ -179,6 +232,7 @@ const processNewTitleResponse = (tab, response) => {
     const newTitle = response.newTitle.trim();
     if (newTitle) {
       // Set the custom title in cache and storage
+      // This will override any DOM element monitoring
       tabTitlesCache[tab.id] = { title: newTitle, url: tab.url };
       chrome.storage.local.set({ tabTitles: tabTitlesCache }, () => {
         chrome.tabs.sendMessage(tab.id, {
@@ -270,7 +324,20 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
     return; // This tab doesn't have a custom title, so we don't care about it.
   }
 
-  // Helper function to apply the title with retry logic
+  // For DOM element monitoring, we don't need to reapply titles as they manage themselves
+  if (customTitleRecord.isDomElement) {
+    // Handle URL changes for DOM element monitoring - clear it as it's page-specific
+    if (changeInfo.url) {
+      console.log(
+        `URL changed for tab ${tabId} with DOM element monitoring, clearing monitoring`,
+      );
+      delete tabTitlesCache[tabId];
+      // Don't persist DOM element clearing to storage as it was never persisted
+    }
+    return;
+  }
+
+  // Helper function to apply the title with retry logic (for regular custom titles)
   const applyTitle = () => {
     applyTitleWithRetry(tabId, customTitleRecord.title, 2, 500); // Fewer retries for tab updates
   };
@@ -332,8 +399,8 @@ chrome.tabs.onActivated.addListener(async (activeInfo) => {
   }
 
   const customTitleRecord = tabTitlesCache[activeInfo.tabId];
-  if (customTitleRecord) {
-    // Apply the title when the tab becomes active
+  if (customTitleRecord && !customTitleRecord.isDomElement) {
+    // Apply the title when the tab becomes active (skip DOM element titles as they manage themselves)
     applyTitleWithRetry(activeInfo.tabId, customTitleRecord.title, 2, 300);
   }
 });

@@ -16,8 +16,8 @@
       closeBtnContainer: 'domCloseHighlighterCont',
       closeBtn: 'domCloseHighlighterBtn',
       highlightStyle:
-        '.domElementHighlighterVisible {box-shadow : 0 0 0 9999px rgba(0, 0, 0, 0.5);} #domCloseHighlighterCont{display:none; top: 20px ; position: fixed; color: white; right: 52px; cursor: pointer; font-size: 25px !important; line-height:0; background-color: rgba(0, 0, 0, 0.8) !important; border-radius:10px !important;}',
-      border: '2px solid red',
+        '.domElementHighlighterVisible {box-shadow : 0 0 0 9999px rgba(0, 0, 0, 0.5);} #domCloseHighlighterCont{display:none; top: 20px ; position: fixed; color: white; right: 52px; cursor: pointer; font-size: 25px !important; line-height:0; background-color: rgba(0, 0, 0, 0.8) !important; border-radius:10px !important;} body.dom-selector-active { cursor: crosshair !important; user-select: none !important; } body.dom-selector-active *:hover { background-color: inherit !important; color: inherit !important; border-color: inherit !important; box-shadow: none !important; opacity: inherit !important; transform: inherit !important; transition: none !important; }',
+      outline: '2px solid red',
       transitionSpeed: 50,
       ignoreElem: ['head', 'meta', 'link', 'style', 'title', 'script'], // elements to ignore
     };
@@ -50,6 +50,20 @@
       mouseleave: 'mouseleave',
       mousedown: 'mousedown',
       keyUp: 'keyup',
+      // Additional events to block during selection
+      mouseout: 'mouseout',
+      dblclick: 'dblclick',
+      contextmenu: 'contextmenu',
+      keydown: 'keydown',
+      keypress: 'keypress',
+      focus: 'focus',
+      blur: 'blur',
+      input: 'input',
+      change: 'change',
+      scroll: 'scroll',
+      touchstart: 'touchstart',
+      touchmove: 'touchmove',
+      touchend: 'touchend',
     };
 
     /*
@@ -92,7 +106,7 @@
         'pointer;' +
         'z-index : 2147483647;' +
         'position :absolute;' +
-        `border : ${opt.border}`
+        `outline : ${opt.outline}`
       );
     };
 
@@ -102,6 +116,7 @@
     const closeHighlight = function () {
       document.removeEventListener(events.mouseover, freezeDomEvent, true);
       document.removeEventListener(events.click, handleCloseClick, true);
+      removeEventBlocking(); // Remove comprehensive event blocking
       const elemHighlighter = document.getElementById(opt.elemId);
       if (elemHighlighter) {
         elemHighlighter.classList.remove(opt.visible);
@@ -118,6 +133,7 @@
     const stop = function () {
       attachListeners(actions.stop);
       document.removeEventListener(events.keyUp, keyPress);
+      removeEventBlocking(); // Remove comprehensive event blocking
       const inspectorElement = document.getElementById(opt.elemId);
       if (inspectorElement) {
         inspectorElement.remove();
@@ -198,6 +214,79 @@
     let freezeDomEvent = function (e) {
       e.stopPropagation();
       e.preventDefault();
+    };
+
+    /*
+     * Comprehensive event blocker for all page interactions during selection
+     * */
+    const blockAllInteractions = function (e) {
+      // Don't block events on our own inspector elements
+      if (
+        e.target &&
+        (e.target.id === opt.elemId ||
+          e.target.id === opt.closeBtnContainer ||
+          e.target.closest('#' + opt.elemId) ||
+          e.target.closest('#' + opt.closeBtnContainer))
+      ) {
+        return;
+      }
+
+      // Block all interactions completely
+      e.stopPropagation();
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      return false;
+    };
+
+    /*
+     * List of events to block during selection
+     * */
+    const eventsToBlock = [
+      // Note: We don't block mouseover and click as they're needed for DOM selector functionality
+      events.dblclick,
+      events.contextmenu,
+      events.mousedown,
+      events.mouseup,
+      events.mouseenter,
+      events.mouseleave,
+      events.mouseout,
+      events.keydown,
+      events.keypress,
+      events.focus,
+      events.blur,
+      events.input,
+      events.change,
+      events.scroll,
+      events.touchstart,
+      events.touchmove,
+      events.touchend,
+    ];
+
+    /*
+     * Adds comprehensive event blocking to prevent page interactions
+     * */
+    const addEventBlocking = function () {
+      // Add CSS class for visual indication and pointer-events blocking
+      document.body.classList.add('dom-selector-active');
+
+      eventsToBlock.forEach((eventType) => {
+        document.addEventListener(eventType, blockAllInteractions, {
+          capture: true,
+          passive: false,
+        });
+      });
+    };
+
+    /*
+     * Removes comprehensive event blocking
+     * */
+    const removeEventBlocking = function () {
+      // Remove CSS class
+      document.body.classList.remove('dom-selector-active');
+
+      eventsToBlock.forEach((eventType) => {
+        document.removeEventListener(eventType, blockAllInteractions, true);
+      });
     };
 
     /*
@@ -439,6 +528,9 @@
      * Initializing the plugin
      * */
     const init = function (type, callback) {
+      // Clean up any existing instance first
+      stop();
+
       // Store the callback function
       callbackFunction = callback;
 
@@ -449,6 +541,11 @@
       setUpInspector();
       attachListeners(action);
       handleCloseByEscape();
+
+      // Add comprehensive event blocking during selection
+      if (action === actions.start) {
+        addEventBlocking();
+      }
     };
 
     /*
