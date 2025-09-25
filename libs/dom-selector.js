@@ -1,5 +1,6 @@
 // https://github.com/sagarchauhan005/domElementHighlighter
 (function (window, document) {
+  // @ts-ignore - Adding domElementHighlighter to window
   window.domElementHighlighter = (function (window, document) {
     let inspector;
     let srcElement;
@@ -27,11 +28,14 @@
     const addStyle = function (styles) {
       const css = document.createElement('style'); /* Create style document */
       css.type = 'text/css'; //couldn't find its alternative, despite it being deprecated
-      if (css.styleSheet) css.styleSheet.cssText = styles;
+      // @ts-ignore - Legacy IE support for styleSheet
+      if ('styleSheet' in css && css.styleSheet)
+        css.styleSheet.cssText = styles;
       else css.appendChild(document.createTextNode(styles));
-      document
-        .getElementsByTagName('head')[0]
-        .appendChild(css); /* Append style to the tag name */
+      const head = document.getElementsByTagName('head')[0];
+      if (head) {
+        head.appendChild(css); /* Append style to the tag name */
+      }
     };
 
     /*
@@ -97,8 +101,14 @@
     const closeHighlight = function () {
       document.removeEventListener(events.mouseover, freezeDomEvent, true);
       document.removeEventListener(events.click, handleCloseClick, true);
-      document.getElementById(opt.elemId).classList.remove(opt.visible);
-      document.getElementById(opt.closeBtnContainer).style.display = 'none';
+      const elemHighlighter = document.getElementById(opt.elemId);
+      if (elemHighlighter) {
+        elemHighlighter.classList.remove(opt.visible);
+      }
+      const closeBtnContainer = document.getElementById(opt.closeBtnContainer);
+      if (closeBtnContainer) {
+        closeBtnContainer.style.display = 'none';
+      }
     };
 
     /*
@@ -121,14 +131,20 @@
       inspector = document.createElement('div'); // inspector elem
       inspector.id = opt.elemId;
       inspector.style = getInspectorDesign(); // get inspector design
-      document.getElementsByTagName('body')[0].prepend(inspector); // append to body
+      const body = document.getElementsByTagName('body')[0];
+      if (body) {
+        body.prepend(inspector); // append to body
+      }
 
       const inspectorOverlay = document.createElement('div'); // inspector elem
       // used important in styling to override the p style tag in different website as this message wasn't visible
       inspectorOverlay.innerHTML =
         '<p style="color:white !important; font-size: 25px !important; padding: 20px 20px 6px 20px !important;">Press Esc to close</p>';
       inspectorOverlay.id = opt.closeBtnContainer;
-      document.getElementById(opt.elemId).append(inspectorOverlay); // append to body
+      const elemHighlighter = document.getElementById(opt.elemId);
+      if (elemHighlighter) {
+        elemHighlighter.append(inspectorOverlay); // append to body
+      }
 
       addStyle(opt.highlightStyle);
     };
@@ -160,6 +176,8 @@
      * */
     const eventEmitter = function (event) {
       let dimensions = getDimensions(event);
+      if (!dimensions) return; // return early if no dimensions
+
       gWidth = dimensions.width;
       gTop = dimensions.top;
       gHeight = dimensions.height;
@@ -185,14 +203,14 @@
      * Gets the CSS selector for the element and optionally logs it
      * */
     const getCssSelectorShort = function (element) {
-      var selector = element.id;
+      var elementId = element.id;
 
       // Stop if an id is found, those are unique.
-      if (selector.id) {
-        return '#' + selector;
+      if (elementId) {
+        return '#' + elementId;
       }
 
-      selector = [];
+      var selector = [];
       var cl, name;
       while (
         element.parentNode &&
@@ -241,6 +259,8 @@
      * */
     const handleCloseClick = function (event) {
       let nDimensions = getDimensions(event);
+      if (!nDimensions) return; // return early if no dimensions
+
       if (
         gTop !== nDimensions.top &&
         gLeft !== nDimensions.left &&
@@ -258,8 +278,14 @@
      * */
     const highlightActiveElem = function (e) {
       srcElement = e.srcElement;
-      document.getElementById(opt.closeBtnContainer).style.display = 'block';
-      document.getElementById(opt.elemId).classList.add(opt.visible);
+      const closeBtnContainer = document.getElementById(opt.closeBtnContainer);
+      if (closeBtnContainer) {
+        closeBtnContainer.style.display = 'block';
+      }
+      const elemHighlighter = document.getElementById(opt.elemId);
+      if (elemHighlighter) {
+        elemHighlighter.classList.add(opt.visible);
+      }
       document.addEventListener(events.mouseover, freezeDomEvent, true);
       document.addEventListener(events.click, handleCloseClick, true);
       const selector = getCssSelectorShort(srcElement); // Get the unique css selector
@@ -316,7 +342,7 @@
         }
       }
 
-      if (actions.stop) {
+      if (type === actions.stop) {
         // removes the keyup listener
         document.removeEventListener(events.keyUp, keyPress);
       }
