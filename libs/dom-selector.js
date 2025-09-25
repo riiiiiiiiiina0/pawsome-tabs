@@ -30,6 +30,7 @@
       css.type = 'text/css'; //couldn't find its alternative, despite it being deprecated
       // @ts-ignore - Legacy IE support for styleSheet
       if ('styleSheet' in css && css.styleSheet)
+        // @ts-ignore - cssText property exists on styleSheet
         css.styleSheet.cssText = styles;
       else css.appendChild(document.createTextNode(styles));
       const head = document.getElementsByTagName('head')[0];
@@ -200,49 +201,121 @@
     };
 
     /*
-     * Gets the CSS selector for the element and optionally logs it
+     * Gets a simple and reliable CSS selector for the element
      * */
     const getCssSelectorShort = function (element) {
-      var elementId = element.id;
+      // Helper function to escape CSS identifiers
+      const escapeCSS = (str) => {
+        return str.replace(/([!"#$%&'()*+,./:;<=>?@[\\\]^`{|}~])/g, '\\$1');
+      };
 
-      // Stop if an id is found, those are unique.
-      if (elementId) {
-        return '#' + elementId;
-      }
-
-      var selector = [];
-      var cl, name;
-      while (
-        element.parentNode &&
-        (selector.length === 0 ||
-          document.querySelectorAll(selector.join(' ')).length !== 1)
-      ) {
-        // if exist, add the first found id and finish building the selector
-        var id = element.getAttribute('id');
-        if (id) {
-          selector.unshift('#' + id);
-          break;
+      // Helper function to get unique selector for element
+      const getUniqueSelector = (elem) => {
+        // 1. Try ID first (most reliable)
+        if (elem.id) {
+          const idSelector = '#' + escapeCSS(elem.id);
+          if (document.querySelectorAll(idSelector).length === 1) {
+            return idSelector;
+          }
         }
 
-        cl = element.getAttribute('class');
-        cl = cl ? '.' + cl.trim().replace(/ +/g, '.') : '';
-        name = element.getAttribute('name');
-        name = name ? '[name=' + name.trim() + ']' : '';
-        selector.unshift(element.localName + cl + name);
-        element = element.parentNode;
+        // 2. Try data attributes (often unique and semantic)
+        const dataAttrs = Array.from(elem.attributes)
+          .filter((attr) => attr.name.startsWith('data-'))
+          .sort((a, b) => a.name.length - b.name.length); // Prefer shorter names
+
+        for (const attr of dataAttrs) {
+          const selector = `[${attr.name}="${escapeCSS(attr.value)}"]`;
+          if (document.querySelectorAll(selector).length === 1) {
+            return selector;
+          }
+        }
+
+        // 3. Try other unique attributes
+        const uniqueAttrs = [
+          'name',
+          'aria-label',
+          'aria-labelledby',
+          'title',
+          'alt',
+        ];
+        for (const attrName of uniqueAttrs) {
+          const attrValue = elem.getAttribute(attrName);
+          if (attrValue) {
+            const selector = `[${attrName}="${escapeCSS(attrValue)}"]`;
+            if (document.querySelectorAll(selector).length === 1) {
+              return selector;
+            }
+          }
+        }
+
+        // 4. Try tag + class combination
+        const tagName = elem.tagName.toLowerCase();
+        const classes = elem.className.trim().split(/\s+/).filter(Boolean);
+
+        if (classes.length > 0) {
+          // Try with all classes first
+          const classSelector =
+            tagName + '.' + classes.map(escapeCSS).join('.');
+          if (document.querySelectorAll(classSelector).length === 1) {
+            return classSelector;
+          }
+
+          // Try with individual classes
+          for (const cls of classes) {
+            const selector = tagName + '.' + escapeCSS(cls);
+            if (document.querySelectorAll(selector).length === 1) {
+              return selector;
+            }
+          }
+        }
+
+        return null;
+      };
+
+      // Try to get a unique selector for the current element
+      let selector = getUniqueSelector(element);
+      if (selector) {
+        return selector;
       }
 
-      var result = selector[0];
-      if (selector.length > 1) {
-        result +=
-          ' > ' +
-          selector
-            .slice(1)
-            .join(' > ')
-            .replace(/\[name=[^\]]*]/g, '');
+      // If no unique selector found, build a minimal path
+      const path = [];
+      let current = element;
+
+      while (current && current !== document.body) {
+        let segment = current.tagName.toLowerCase();
+
+        // Add index if there are siblings with same tag
+        const siblings = Array.from(current.parentNode?.children || []).filter(
+          (sibling) => sibling.tagName === current.tagName,
+        );
+
+        if (siblings.length > 1) {
+          const index = siblings.indexOf(current) + 1;
+          segment += `:nth-of-type(${index})`;
+        }
+
+        path.unshift(segment);
+
+        // Check if current path is unique
+        const currentSelector = path.join(' > ');
+        if (document.querySelectorAll(currentSelector).length === 1) {
+          return currentSelector;
+        }
+
+        // Try to find a unique parent to anchor to
+        current = current.parentNode;
+        if (current && current !== document.body) {
+          const parentSelector = getUniqueSelector(current);
+          if (parentSelector) {
+            return parentSelector + ' > ' + path.join(' > ');
+          }
+        }
       }
 
-      return result;
+      // Fallback: return the full path
+      return path.join(' > ');
     };
 
     /*
