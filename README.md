@@ -1,4 +1,4 @@
-# Pawsome Tabs
+# Tab Renamer Bear
 
 Rename any tab title in Chrome — and keep sites from changing it back.
 
@@ -28,7 +28,7 @@ Rename any tab title in Chrome — and keep sites from changing it back.
 ## Usage
 
 1. Open any tab you want to rename.
-2. Click the Pawsome Tabs toolbar icon.
+2. Click the Tab Renamer Bear toolbar icon.
 3. Enter a new title in the prompt and press OK.
    - Entering an empty value removes the custom title and restores the page’s original title.
 
@@ -73,7 +73,7 @@ Project layout:
 Recommended dev steps:
 
 1. Load the extension unpacked as described above.
-2. Open `chrome://extensions`, find Pawsome Tabs, and click “Service worker” to view background logs.
+2. Open `chrome://extensions`, find Tab Renamer Bear, and click “Service worker” to view background logs.
 3. Use the DevTools Console on a page to see content script logs when titles are applied/blocked.
 
 ## License
